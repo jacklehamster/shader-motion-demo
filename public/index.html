@@ -5,6 +5,7 @@
     <script src="gen/main.js"></script>
     <script>
       const controller = {};
+      let activeProgram;
 
       function initialize(gl) {
         const triangleArray = gl.createVertexArray();
@@ -22,43 +23,23 @@
           gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
           gl.enableVertexAttribArray(0);
 
-          const colors = new Float32Array([
-              1.0, 0.0, 0.0,
-              0.0, 1.0, 0.0,
-              0.0, 0.0, 1.0
-          ]);
-
-          const colorBuffer = gl.createBuffer();
-          gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);SubtleCrypto
-          gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
           gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
           gl.enableVertexAttribArray(1);
-        return {triangleArray, positions, positionBuffer, colors, colorBuffer};
+        return {triangleArray, positions, positionBuffer};
       }
 
-      function dispose(gl, {triangleArray, positions, positionBuffer, colors, colorBuffer}) {
+      function dispose(gl, {triangleArray, positions, positionBuffer}) {
         gl.deleteVertexArray(triangleArray);
         delete positions;
-        delete colors;
         gl.deleteBuffer(positionBuffer);
-        gl.deleteBuffer(colorBuffer);
       }
 
-      function staticRefresh(gl) {
+      function timerRefresh(gl) {
         const resources = initialize(gl);
-        const {triangleArray, positions, positionBuffer, colors, colorBuffer} = resources;
-        ////////////////
-        // DRAW
-        ////////////////
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        const {triangleArray, positions, positionBuffer} = resources;
 
-        dispose(gl, resources);
-      }
+        const timeLocation = controller.getUniformLocation("time");
 
-      function animatedRefresh(gl) {
-        const resources = initialize(gl);
-        const {triangleArray, positions, positionBuffer, colors, colorBuffer} = resources;
 
         ////////////////
         // DRAW
@@ -67,7 +48,40 @@
         const loop = (time) => {
           //  update position
           if (time) {
-            positions[0] = Math.sin(time / 100);
+            gl.uniform1f(timeLocation, time);
+
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+          }
+          id = requestAnimationFrame(loop);
+        };
+
+        loop(0);
+
+        return () => {
+          dispose(gl, resources);
+          cancelAnimationFrame(id);
+        };
+      }
+
+      function animatedRefresh(gl) {
+        const resources = initialize(gl);
+        const {triangleArray, positions, positionBuffer} = resources;
+
+        const timeLocation = controller.getUniformLocation("time");
+        gl.uniform1f(timeLocation, 0);
+
+        ////////////////
+        // DRAW
+        ////////////////
+        let id;
+        const loop = (time) => {
+          //  update position
+          if (time) {
+            positions[0] = Math.sin(time / 200);
+            positions[3] = Math.sin(time / 200) - 0.5;
+            positions[6] = Math.sin(time / 200) + 0.5;
+
             gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
 
@@ -93,15 +107,16 @@
               vertex: 
               `#version 300 es
 
+                uniform float time;
+
                 precision highp float;
                 layout (location=0) in vec4 position;
-                layout (location=1) in vec3 color;
                 
                 out vec3 vColor;
 
                 void main() {
-                    vColor = color;
                     gl_Position = position;
+                    gl_Position[0] += sin(time / 200.);
                 }
               `,
               fragment:
@@ -112,58 +127,12 @@
                 out vec4 fragColor;
 
                 void main() {
-                    fragColor = vec4(vColor, 1.0);
-                }
-              `
-            },
-          {
-              id: "sample-red",
-              vertex: 
-              `#version 300 es
-
-                precision highp float;
-                in vec4 position;
-
-                void main() {
-                    gl_Position = position;
-                }
-              `,
-              fragment:
-              `#version 300 es
-
-                precision highp float;
-                out vec4 fragColor;
-
-                void main() {
-                    fragColor = vec4(0.5, 0.0, 0.0, 1.0);
-                }
-              `
-          },
-          {
-              id: "sample-blue",
-              vertex: 
-              `#version 300 es
-
-                precision highp float;
-                in vec4 position;
-
-                void main() {
-                    gl_Position = position;
-                }
-              `,
-              fragment:
-              `#version 300 es
-
-                precision highp float;
-                out vec4 fragColor;
-
-                void main() {
-                    fragColor = vec4(0.0, 0.0, 0.5, 1.0);
+                    fragColor = vec4(0.0, 0.0, 1.0, 1.0);
                 }
               `
             },
         ],
-        onRefresh: staticRefresh,
+        onRefresh: timerRefresh,
       };
 
       document.addEventListener("DOMContentLoaded", () => {
@@ -182,21 +151,24 @@
         <input id="active" type="checkbox" onChange="controller?.setActive(this.checked)" checked>    
       </div>
       <div>
-        <label for="program">Program:</label>
-        <select id="program" onchange="controller?.setActiveProgram(this.value)">
-          <option value="sample-multicolor" selected>Sample Multicolor</option>
-          <option value="sample-red">Sample Red</option>
-          <option value="sample-blue">Sample Blue</option>
-        </select>
-      </div>
-      <div>
         <label for="refresh">Refresh:</label>
-        <select id="refresh" onchange="controller?.setRefresh(this.value === 'static' ? staticRefresh : animatedRefresh)">
-          <option value="static" selected>static</option>
+        <select id="refresh" onchange="controller?.setRefresh(this.value === 'timer' ? timerRefresh : animatedRefresh); updateDescription()">
+          <option value="timer" selected>timer</option>
           <option value="animated">animated</option>
         </select>
       </div>
     </div>
+    <div id="description" style="position: fixed; right: 20px; bottom: 20px; white-space: pre;"></div>
+    <script>
+      function updateDescription() {
+        const descDiv = document.getElementById("description");
+        const refreshValue = document.getElementById("refresh");
+        descDiv.textContent = refreshValue.value === "timer" ?
+          `Animation is performed by the shader. We only pass a changing time through a uniform.\nWhen processing several shapes, this can boost performance.`
+          : `Animation is performed by the CPU. Every frame, we pass all vertex positions of the triangle.`;
+      }
+      updateDescription();
+    </script>
 
 
 
